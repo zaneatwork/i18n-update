@@ -10,13 +10,13 @@ Run it from inside your Rails app:
 ruby ~/whatever_dir/i18n-update.rb
 ```
 
-Alternatively, mark it as executable and put it in your Rails app's `bin` dir
+Alternatively, put it in your Rails app's `bin` dir and mark it as executable.
 ```
-chmod +x i18n-update/i18n-update.rb
-cp i18n-update/i18n-update.rb myproj/bin
+cp i18n-update/i18n-update.rb myproj/bin/i18n-update
+chmod +x myproj/bin/i18n-update
 ```
 
-Then you can run it to your heart's content using just:
+Then you can run it to your heart's content using:
 ```
 bin/i18n-update
 ```
