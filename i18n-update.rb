@@ -3,15 +3,18 @@
 require 'yaml'
 require 'fileutils'
 require 'optparse'
+require 'debug'
+
 
 OPTIONS = {
   base_locale_file: 'config/locales/en.yml'
 }
+
 OptionParser.new do |opt|
   opt.on('-y') { OPTIONS[:auto_yes] = true }
 
-  opt.on('-s', '--staged', 'Use staged changes') do
-    OPTIONS[:use_staged] = true
+  opt.on('-u', '--unstaged', 'Only translate unstaged changes') do
+    OPTIONS[:use_unstaged] = true
   end
 
   opt.on('-b, 
@@ -22,6 +25,7 @@ OptionParser.new do |opt|
 end.parse!
 
 BACKUP_FILE = "#{OPTIONS[:base_locale_file]}.old"
+LAST_COMMIT_FILE = "#{OPTIONS[:base_locale_file]}.last_commit"
 
 def run_command(cmd)
   puts "Running: #{cmd}"
@@ -33,7 +37,7 @@ def run_command(cmd)
 end
 
 def get_changed_lines
-  diff_from = OPTIONS[:use_staged] ? '--staged' : 'HEAD'
+  diff_from = OPTIONS[:only_unstaged] ? 'HEAD' : '--staged' 
   diff_output = run_command("git diff #{diff_from} #{OPTIONS[:base_locale_file]}")
   
   changed_lines = []
@@ -43,12 +47,12 @@ def get_changed_lines
     end
   end
   
-  puts "Found #{changed_lines.length} changed lines in #{OPTIONS[:use_staged] ? 'staged' : 'unstaged'} diff"
+  puts "Found #{changed_lines.length} #{'unstaged' if OPTIONS[:only_unstaged]} changed lines in diff"
   changed_lines
 end
 
-def extract_keys_from_lines(changed_lines)
-  yaml_content = YAML.load_file(OPTIONS[:base_locale_file])
+def extract_keys_from_lines(locale_file, changed_lines)
+  yaml_content = YAML.load_file(locale_file)
   keys = []
   
   changed_lines.each do |line|
@@ -56,7 +60,7 @@ def extract_keys_from_lines(changed_lines)
       indent = $1
       key_name = $2
       
-      full_keys = find_full_key_paths(OPTIONS[:base_locale_file], key_name, line)
+      full_keys = find_full_key_paths(locale_file, key_name, line)
       if full_keys
         keys += full_keys
       end
@@ -120,11 +124,26 @@ def translate_missing
   run_command("bundle exec i18n-tasks translate-missing")
 end
 
-def cleanup_backup
-  if File.exist?(BACKUP_FILE)
-    FileUtils.rm(BACKUP_FILE)
-    puts "Cleaned up backup file"
+def delete_file file
+  if File.exist?(file)
+    FileUtils.rm(file)
+    puts "Deleted #{file}"
   end
+end
+
+def confirm message
+  if !OPTIONS[:auto_yes]
+    puts message
+    response = STDIN.gets.chomp.downcase
+    unless response == 'y' || response == 'yes'
+      puts "Aborted."
+      exit 0
+    end
+  end
+end
+
+def create_copy_of_last_commit
+  run_command("git show HEAD:#{OPTIONS[:base_locale_file]} > #{LAST_COMMIT_FILE}")
 end
 
 begin
@@ -134,31 +153,33 @@ begin
     exit 0
   end
   
-  keys = extract_keys_from_lines(changed_lines)
+  keys = if OPTIONS[:only_unstaged]
+    # keys that are removed don't exist in the file anymore and have to be 
+    # picked from the last commit instead of the unstaged changes diff.
+    unstaged_keys = extract_keys_from_lines(OPTIONS[:base_locale_file], changed_lines)
+
+    create_copy_of_last_commit
+    last_commit_keys = extract_keys_from_lines(LAST_COMMIT_FILE, lines)
+    delete_file LAST_COMMIT_FILE 
+
+    keys_removed = last_commit_keys - unstaged_keys
+    unstaged_keys + keys_removed
+  else 
+    create_copy_of_last_commit
+    keys = extract_keys_from_lines(LAST_COMMIT_FILE, changed_lines)
+    delete_file LAST_COMMIT_FILE 
+    keys
+  end
+
   if keys.empty?
     puts "\nNo valid i18n keys found in changes. Exiting."
     exit 0
   end
 
-  # TODO: handle when a key is removed instead of updated or added
-  # Get full base locale from last commit.
-  # Get keys from changed lines and run 'extract_keys_from_lines' using 
-  #   changed_lines on that bad boy.
-  # Compare those keys to the current, if any keys exist in last commit but not 
-  #   the current staged/unstaged changes then those need retranslated.
-  
   puts "\n=== Locale keys to retranslate ==="
   keys.each { |k| puts "  - #{k}" }
 
-  if !OPTIONS[:auto_yes]
-    puts "\nContinue retranslating? [y/N]"
-    response = STDIN.gets.chomp.downcase
-    unless response == 'y' || response == 'yes'
-      puts "Aborted."
-      exit 0
-    end
-  end
-  
+  confirm "\nContinue retranslating? [y/N]"
   backup_file
   remove_keys(keys)
   restore_backup
@@ -168,7 +189,7 @@ begin
   puts "The following keys have been retranslated:"
   keys.each { |k| puts "  - #{k}" }
   
-  cleanup_backup
+  delete_file BACKUP_FILE 
   
 rescue => e
   puts "\nError: #{e.message}"
