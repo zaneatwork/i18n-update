@@ -22,7 +22,7 @@ bin/i18n-update
 ```
 
 ## Options:
-- `-b config/locales/somelocal.yml` specify a different **B**ase locale (default is en.yml)
+- `-b config/locales/somelocale.yml` specify a different **B**ase locale (default is en.yml)
 - `-h` command **H**elp (show these flags) 
 - `-s` **S**taged changes
 - `-v` **V**erbose mode 
