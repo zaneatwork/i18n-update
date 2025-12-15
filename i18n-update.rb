@@ -3,7 +3,6 @@
 require 'yaml'
 require 'fileutils'
 require 'optparse'
-require 'debug'
 
 
 OPTIONS = {
@@ -11,27 +10,31 @@ OPTIONS = {
 }
 
 OptionParser.new do |opt|
-  opt.on('-y') { OPTIONS[:auto_yes] = true }
-
-  opt.on('-u', '--unstaged', 'Only translate unstaged changes') do
-    OPTIONS[:use_unstaged] = true
-  end
-
   opt.on('-b, 
     --base-locale BASELOCALE', 
     'Use different base locale. (default is config/locales/en.yml)') do |b|
     OPTIONS[:base_locale_file] = b 
   end
+
+  opt.on('-u', '--unstaged', 'Only translate unstaged changes') do
+    OPTIONS[:use_unstaged] = true
+  end
+
+  opt.on('-v', '--verbose', 'Verbose mode') do
+    OPTIONS[:verbose] = true
+  end
+
+  opt.on('-y') { OPTIONS[:auto_yes] = true }
 end.parse!
 
 BACKUP_FILE = "#{OPTIONS[:base_locale_file]}.old"
 LAST_COMMIT_FILE = "#{OPTIONS[:base_locale_file]}.last_commit"
 
 def run_command(cmd)
-  puts "Running: #{cmd}"
+  verbose_log "Running: #{cmd}"
   output = `#{cmd}`
   unless $?.success?
-    puts "Warning: Command failed with status #{$?.exitstatus}"
+    verbose_log "Warning: Command failed with status #{$?.exitstatus}"
   end
   output
 end
@@ -47,7 +50,8 @@ def get_changed_lines
     end
   end
   
-  puts "Found #{changed_lines.length} #{'unstaged' if OPTIONS[:only_unstaged]} changed lines in diff"
+  verbose_log "Found #{changed_lines.length} \
+        #{'unstaged' if OPTIONS[:only_unstaged]} changed lines in diff"
   changed_lines
 end
 
@@ -100,34 +104,34 @@ def find_full_key_paths(file_path, key_name, target_line)
 end
 
 def backup_file
-  puts "\nCreating backup of unstaged changed locale values"
+  verbose_log "\nCreating backup of unstaged changed locale values"
   FileUtils.cp(OPTIONS[:base_locale_file], BACKUP_FILE)
-  puts "Created backup: #{BACKUP_FILE}"
+  verbose_log "Created backup: #{BACKUP_FILE}"
 end
 
 def remove_keys(keys)
-  puts "\nRemoving keys from all locale files so we can retranslate"
+  verbose_log "\nRemoving keys from all locale files so we can retranslate"
   keys.each do |key|
-    puts "  Removing key: #{key}"
+    verbose_log "  Removing key: #{key}"
     run_command("bundle exec i18n-tasks rm '#{key}'")
   end
 end
 
 def restore_backup
-  puts "\nRestoring unstaged changes to base locale"
+  verbose_log "\nRestoring unstaged changes to base locale"
   FileUtils.cp(BACKUP_FILE, OPTIONS[:base_locale_file])
-  puts "Restored #{OPTIONS[:base_locale_file]} from backup"
+  verbose_log "Restored #{OPTIONS[:base_locale_file]} from backup"
 end
 
 def translate_missing
-  puts "\nTranslating the updated locale keys"
+  verbose_log "\nTranslating the updated locale keys"
   run_command("bundle exec i18n-tasks translate-missing")
 end
 
 def delete_file file
   if File.exist?(file)
     FileUtils.rm(file)
-    puts "Deleted #{file}"
+    verbose_log "Deleted #{file}"
   end
 end
 
@@ -144,6 +148,10 @@ end
 
 def create_copy_of_last_commit
   run_command("git show HEAD:#{OPTIONS[:base_locale_file]} > #{LAST_COMMIT_FILE}")
+end
+
+def verbose_log message
+  puts message if options[:verbose]
 end
 
 begin
@@ -185,9 +193,9 @@ begin
   restore_backup
   translate_missing
   
-  puts "\n=== Process complete! ==="
-  puts "The following keys have been retranslated:"
-  keys.each { |k| puts "  - #{k}" }
+  puts "\n=== Translation complete! ==="
+  verbose_log "The following keys have been retranslated:"
+  keys.each { |k| verbose_log "  - #{k}" }
   
   delete_file BACKUP_FILE 
   
@@ -196,9 +204,9 @@ rescue => e
   puts e.backtrace.join("\n")
   
   if File.exist?(BACKUP_FILE)
-    puts "\nAttempting to restore backup..."
+    verbose_log "\nAttempting to restore backup..."
     FileUtils.cp(BACKUP_FILE, OPTIONS[:base_locale_file])
-    puts "Backup restored due to error"
+    verbose_log "Backup restored due to error"
   end
   
   exit 1
